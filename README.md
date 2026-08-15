@@ -56,13 +56,7 @@ Don't run `npm run dev` or `npm start` directly from PowerShell/cmd: those scrip
 
 The first PGlite cold start (a fresh `.data/pglite` or a Windows Firewall/Defender prompt for `node.exe`) can take a couple of minutes; later starts reusing the same data directory are fast.
 
-The test suite (`npm test` / `just test`) has known Windows-only failures — not a sign the app is broken, just platform gaps in the tests themselves:
-- A handful of tests that create a real PGlite instance run close to or past vitest's default 5s timeout, since PGlite cold-starts noticeably slower on Windows than on Linux/macOS CI.
-- The Makefile-workflow test shells out to `make`, which isn't installed here.
-- One snapshot-store test simulates a read-only `latest.json` and rewrites it via rename; POSIX rename ignores the destination file's permissions, but Windows/NTFS blocks renaming over a read-only file.
-- One integration test triggers graceful shutdown with `child.kill("SIGTERM")`; Windows has no trappable POSIX signals, so `SIGTERM`/`SIGINT` sent this way always hard-kill the process instead of running the app's shutdown handler.
-
-None of these affect the running app — they're artifacts of the test harness on Windows.
+The test suite (`npm test` / `just test`) has known Windows-only failures (PGlite cold-start timing vs. vitest's default timeout, a missing `make` binary, and NTFS/signal differences from POSIX) — these are test-harness artifacts, not signs the app is broken.
 
 ## Test against a Databricks Volume
 
