@@ -48,6 +48,22 @@ make docker-run
 
 The image keeps live PGlite files under `/tmp/pglite/data` and snapshots under the `/snapshots` mount. Removing the container and starting it again exercises archive restoration. Filesystem mode uses a standalone Express server, so local Node and Docker runs do not require Databricks credentials. It exposes only the HTTP port; PGlite remains in-process and never opens PostgreSQL port 5432.
 
+### Windows
+
+`make` isn't installed by default on Windows. Use the equivalent [`just`](https://just.systems) recipes instead (`just install`, `just local`, `just docker-build`/`docker-run` — the latter default to `podman`, override with `CONTAINER_ENGINE=docker`). `just` requires a POSIX `sh` on PATH, which Git for Windows already provides.
+
+Don't run `npm run dev` or `npm start` directly from PowerShell/cmd: those scripts set env vars with `VAR=val cmd` syntax, and npm always launches scripts through `cmd.exe` on Windows regardless of the calling shell, so it fails with `'NODE_ENV' is not recognized...`. `just local`/`just local-volume` sidestep this by invoking `tsx` directly.
+
+The first PGlite cold start (a fresh `.data/pglite` or a Windows Firewall/Defender prompt for `node.exe`) can take a couple of minutes; later starts reusing the same data directory are fast.
+
+The test suite (`npm test` / `just test`) has known Windows-only failures — not a sign the app is broken, just platform gaps in the tests themselves:
+- A handful of tests that create a real PGlite instance run close to or past vitest's default 5s timeout, since PGlite cold-starts noticeably slower on Windows than on Linux/macOS CI.
+- The Makefile-workflow test shells out to `make`, which isn't installed here.
+- One snapshot-store test simulates a read-only `latest.json` and rewrites it via rename; POSIX rename ignores the destination file's permissions, but Windows/NTFS blocks renaming over a read-only file.
+- One integration test triggers graceful shutdown with `child.kill("SIGTERM")`; Windows has no trappable POSIX signals, so `SIGTERM`/`SIGINT` sent this way always hard-kill the process instead of running the app's shutdown handler.
+
+None of these affect the running app — they're artifacts of the test harness on Windows.
+
 ## Test against a Databricks Volume
 
 The Makefile defaults to the valid `ps` Databricks CLI profile. After the dev bundle has created its catalog, schema, and Volume:
