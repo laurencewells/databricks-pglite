@@ -1,0 +1,7 @@
+command:
+  - npm
+  - start
+
+env:
+  - name: SNAPSHOT_MODE
+    value: appkit

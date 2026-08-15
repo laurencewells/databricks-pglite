@@ -1,0 +1,121 @@
+bundle:
+  name: pglite-durability-lab
+
+sync:
+  include:
+    - build/**
+    - client/dist/**
+  exclude:
+    - node_modules/**
+
+variables:
+  app_name:
+    description: "Databricks App name"
+    default: "pglite-durability-lab-dev"
+  catalog_name:
+    description: "Managed Unity Catalog catalog for the proof-of-concept"
+    default: "pglite_app_dev"
+  schema_name:
+    description: "Schema containing the snapshot Volume"
+    default: "app"
+  volume_name:
+    description: "Managed Volume containing immutable PGlite snapshots"
+    default: "snapshots"
+  snapshot_interval_ms:
+    description: "Best-effort automatic checkpoint interval"
+    default: "30000"
+  snapshot_retention:
+    description: "Number of snapshot generations to retain"
+    default: "3"
+  web_ui_enabled:
+    description: "Serve the read-only browser frontend"
+    default: "true"
+
+  app_config:
+    type: complex
+    description: "App command and runtime environment"
+    default:
+      command:
+        - npm
+        - start
+      env:
+        - name: SNAPSHOT_MODE
+          value: appkit
+        - name: DATABRICKS_VOLUME_FILES
+          value: /Volumes/${var.catalog_name}/${var.schema_name}/${var.volume_name}
+        - name: PGLITE_DATA_DIR
+          value: /tmp/pglite/data
+        - name: SNAPSHOT_INTERVAL_MS
+          value: ${var.snapshot_interval_ms}
+        - name: SNAPSHOT_RETENTION
+          value: ${var.snapshot_retention}
+        - name: WEB_UI_ENABLED
+          value: ${var.web_ui_enabled}
+
+resources:
+  catalogs:
+    pglite_catalog:
+      name: ${var.catalog_name}
+      comment: "PGlite durability proof-of-concept managed by a Databricks Asset Bundle"
+      grants:
+        - principal: ${resources.apps.pglite_app.service_principal_client_id}
+          privileges:
+            - USE_CATALOG
+
+  schemas:
+    app:
+      name: ${var.schema_name}
+      catalog_name: ${resources.catalogs.pglite_catalog.name}
+      comment: "Application resources for the PGlite durability proof-of-concept"
+      grants:
+        - principal: ${resources.apps.pglite_app.service_principal_client_id}
+          privileges:
+            - USE_SCHEMA
+
+  volumes:
+    snapshots:
+      name: ${var.volume_name}
+      catalog_name: ${resources.catalogs.pglite_catalog.name}
+      schema_name: ${resources.schemas.app.name}
+      volume_type: MANAGED
+      comment: "Immutable PGlite archive generations and latest pointer"
+      grants:
+        - principal: ${resources.apps.pglite_app.service_principal_client_id}
+          privileges:
+            - READ_VOLUME
+            - WRITE_VOLUME
+
+  apps:
+    pglite_app:
+      name: ${var.app_name}
+      description: "Embedded PGlite with checksummed Unity Catalog Volume checkpoints"
+      source_code_path: .
+      config: ${var.app_config}
+      resources:
+        - name: files
+          description: "Managed Volume used for PGlite checkpoint archives"
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: ${resources.catalogs.pglite_catalog.name}.${resources.schemas.app.name}.${resources.volumes.snapshots.name}
+            permission: WRITE_VOLUME
+
+targets:
+  dev:
+    default: true
+    variables:
+      app_name: "pglite-durability-lab-dev"
+      catalog_name: "pglite_app_dev"
+      schema_name: "app"
+      volume_name: "snapshots"
+      web_ui_enabled: "true"
+      snapshot_interval_ms: "30000"
+      snapshot_retention: "10"
+
+  prod:
+    variables:
+      app_name: "pglite-durability-lab"
+      catalog_name: "pglite_app"
+      schema_name: "app"
+      volume_name: "snapshots"
+      snapshot_interval_ms: "15000"
+      snapshot_retention: "5"
