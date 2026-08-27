@@ -18,6 +18,7 @@ profile         := env_var_or_default("PROFILE", "DEFAULT")
 target          := env_var_or_default("TARGET", "dev")
 app             := env_var_or_default("APP", "pglite_app")
 app_name        := env_var_or_default("APP_NAME", "pglite-durability-lab-dev")
+app_script      := env_var_or_default("APP_SCRIPT", "start")
 port            := env_var_or_default("PORT", "8000")
 uc_catalog      := env_var_or_default("UC_CATALOG", "pglite_app_dev")
 uc_schema       := env_var_or_default("UC_SCHEMA", "app")
@@ -58,6 +59,30 @@ local-volume:
 build:
     npm run build
 
+# Run the durable sidecar with a short-lived Node child.
+sidecar-smoke: build
+    #!/usr/bin/env sh
+    set -eu
+    sidecar_root=$(mktemp -d)
+    trap 'rm -rf "$sidecar_root"' EXIT HUP INT TERM
+    PGLITE_DATA_DIR="$sidecar_root/database" \
+    SNAPSHOT_MODE=filesystem \
+    SNAPSHOT_DIRECTORY="$sidecar_root/snapshots" \
+    PGLITE_SOCKET_PORT=15432 \
+    node build/sidecar.mjs -- node -e "process.exit(0)"
+
+# Run the Python example through the production sidecar entrypoint.
+python-example-smoke: build
+    #!/usr/bin/env sh
+    set -eu
+    sidecar_root=$(mktemp -d)
+    trap 'rm -rf "$sidecar_root"' EXIT HUP INT TERM
+    PGLITE_DATA_DIR="$sidecar_root/database" \
+    SNAPSHOT_MODE=filesystem \
+    SNAPSHOT_DIRECTORY="$sidecar_root/snapshots" \
+    PGLITE_SOCKET_PORT=15433 \
+    npm run start:python-example -- --help
+
 typecheck:
     npm run typecheck
 
@@ -80,7 +105,7 @@ docker-run:
 
 # Read-only DAB validation (-t {{target}} -p {{profile}}).
 validate:
-    databricks bundle validate -t {{target}} -p {{profile}}
+    databricks bundle validate -t {{target}} -p {{profile}} --var="app_script={{app_script}}"
 
 # The local npm proxy is unreachable from Databricks Apps. Ship a temporary
 # public-registry lockfile, then restore the developer lock after deployment.
@@ -112,14 +137,18 @@ deploy: test validate
     }
     trap restore_lock EXIT HUP INT TERM
     sed 's#https://npm-proxy.cloud.databricks.com/#https://registry.npmjs.org/#g' package-lock.dev-bak > package-lock.json
-    databricks bundle deploy -t {{target}} -p {{profile}}
+    databricks bundle deploy -t {{target}} -p {{profile}} --var="app_script={{app_script}}"
 
 # Start/restart the deployed app resource.
 run:
-    databricks bundle run {{app}} -t {{target}} -p {{profile}}
+    databricks bundle run {{app}} -t {{target}} -p {{profile}} --var="app_script={{app_script}}"
 
 deploy-run: deploy
-    databricks bundle run {{app}} -t {{target}} -p {{profile}}
+    databricks bundle run {{app}} -t {{target}} -p {{profile}} --var="app_script={{app_script}}"
+
+# Deploy and run the opt-in Python example.
+deploy-python:
+    APP_SCRIPT=start:python-example just deploy-run
 
 # Print the deployed Databricks App URL.
 app-url:

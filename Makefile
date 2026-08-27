@@ -4,6 +4,7 @@ PROFILE        ?= DEFAULT
 TARGET         ?= dev
 APP            ?= pglite_app
 APP_NAME       ?= pglite-durability-lab-dev
+APP_SCRIPT     ?= start
 PORT           ?= 8000
 UC_CATALOG     ?= pglite_app_dev
 UC_SCHEMA      ?= app
@@ -21,7 +22,7 @@ endif
 endif
 endif
 
-.PHONY: help install local local-volume build test typecheck docker-build docker-run validate deploy run deploy-run app-url lock-public lock-restore destroy
+.PHONY: help install local local-volume build sidecar-smoke python-example-smoke test typecheck docker-build docker-run validate deploy run deploy-run deploy-python app-url lock-public lock-restore destroy
 
 help:
 	@echo "Targets:"
@@ -29,6 +30,8 @@ help:
 	@echo "  make local         — local PGlite + filesystem snapshots on :$(PORT)"
 	@echo "  make local-volume  — local app using the $(PROFILE) profile and UC Volume"
 	@echo "  make build         — build server and React client"
+	@echo "  make sidecar-smoke — run the durable sidecar with a short-lived Node child"
+	@echo "  make python-example-smoke — run the Python example through the sidecar"
 	@echo "  make test          — run tests, typecheck, and production build"
 	@echo "  make docker-build  — build $(DOCKER_IMAGE)"
 	@echo "  make docker-run    — run the image with a bind-mounted snapshot directory"
@@ -36,6 +39,7 @@ help:
 	@echo "  make deploy        — build and deploy the bundle"
 	@echo "  make run           — start/restart the deployed app resource"
 	@echo "  make deploy-run    — deploy, then start/restart"
+	@echo "  make deploy-python — deploy and run the opt-in Python example"
 	@echo "  make app-url       — print the deployed Databricks App URL"
 	@echo "  make destroy       — dry-run; use CONFIRM=1 to destroy bundle resources"
 
@@ -62,6 +66,26 @@ local-volume:
 build:
 	npm run build
 
+sidecar-smoke: build
+	@set -eu; \
+	  sidecar_root=$$(mktemp -d); \
+	  trap 'rm -rf "$$sidecar_root"' EXIT HUP INT TERM; \
+	  PGLITE_DATA_DIR="$$sidecar_root/database" \
+	  SNAPSHOT_MODE=filesystem \
+	  SNAPSHOT_DIRECTORY="$$sidecar_root/snapshots" \
+	  PGLITE_SOCKET_PORT=15432 \
+	  npm run start:sidecar -- -- node -e "process.exit(0)"
+
+python-example-smoke: build
+	@set -eu; \
+	  sidecar_root=$$(mktemp -d); \
+	  trap 'rm -rf "$$sidecar_root"' EXIT HUP INT TERM; \
+	  PGLITE_DATA_DIR="$$sidecar_root/database" \
+	  SNAPSHOT_MODE=filesystem \
+	  SNAPSHOT_DIRECTORY="$$sidecar_root/snapshots" \
+	  PGLITE_SOCKET_PORT=15433 \
+	  npm run start:python-example -- --help
+
 typecheck:
 	npm run typecheck
 
@@ -82,7 +106,7 @@ docker-run:
 	  $(DOCKER_IMAGE)
 
 validate:
-	databricks bundle validate -t $(TARGET) -p $(PROFILE)
+	databricks bundle validate -t $(TARGET) -p $(PROFILE) --var="app_script=$(APP_SCRIPT)"
 
 # The local npm proxy is unreachable from Databricks Apps. Ship a temporary
 # public-registry lockfile, then restore the developer lock after deployment.
@@ -112,13 +136,16 @@ deploy: test validate
 	  }; \
 	  trap restore_lock EXIT HUP INT TERM; \
 	  sed 's#https://npm-proxy.cloud.databricks.com/#https://registry.npmjs.org/#g' package-lock.dev-bak > package-lock.json; \
-	  databricks bundle deploy -t $(TARGET) -p $(PROFILE)
+	  databricks bundle deploy -t $(TARGET) -p $(PROFILE) --var="app_script=$(APP_SCRIPT)"
 
 run:
-	databricks bundle run $(APP) -t $(TARGET) -p $(PROFILE)
+	databricks bundle run $(APP) -t $(TARGET) -p $(PROFILE) --var="app_script=$(APP_SCRIPT)"
 
 deploy-run: deploy
-	databricks bundle run $(APP) -t $(TARGET) -p $(PROFILE)
+	databricks bundle run $(APP) -t $(TARGET) -p $(PROFILE) --var="app_script=$(APP_SCRIPT)"
+
+deploy-python: APP_SCRIPT := start:python-example
+deploy-python: deploy-run
 
 app-url:
 	databricks apps get $(APP_NAME) -p $(PROFILE) --output json | jq -r .url

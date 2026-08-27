@@ -18,14 +18,14 @@ AppKit server + React UI ── in-process ── PGlite on /tmp
           Unity Catalog Volume
 ```
 
-The application provides a read-only database browser alongside a checkpoint status summary and details disclosure. The browser lets authenticated callers inspect the connected database's user schemas and paginated table rows without exposing write controls. The summary shows changes that exist only in local PGlite; its details disclosure lists the last checkpoint timestamp, archive filename, and archive restored during startup.
+The original application provides a read-only database browser alongside a checkpoint status summary and details disclosure. The same durability layer can also supervise another application process and give it a loopback-only PostgreSQL connection. The browser lets authenticated callers inspect the connected database's user schemas and paginated table rows without exposing write controls. The summary shows changes that exist only in local PGlite; its details disclosure lists the last checkpoint timestamp, archive filename, and archive restored during startup.
 
 ## Important constraints
 
 - Keep Databricks App horizontal scaling disabled. Multiple instances would create independent databases and race over the snapshot pointer.
 - A crash can lose every write after the last successful checkpoint.
 - The shared PGlite database does not inherit Unity Catalog row or column policies. Every identity with `CAN_USE` can inspect the same database contents and can execute the trusted SQL endpoint.
-- `pglite-socket` and PostgreSQL port 5432 are not exposed. The app uses the single HTTP listener supplied through `DATABRICKS_APP_PORT`.
+- Sidecar mode binds `pglite-socket` only to literal `127.0.0.1`; never expose its PostgreSQL port outside the app container. The supervised child remains the only externally served application.
 - AppKit accesses the Volume as the application service principal. Its generic file routes deny end-user operations on the snapshot resource.
 
 ## Local development
@@ -38,6 +38,48 @@ make local
 ```
 
 Open `http://localhost:8000`. Local state lives under `.data/`.
+
+## Run PGlite beside a Python app
+
+The runnable FastAPI example in `examples/python` exposes:
+
+- `GET /health` to verify its PGlite connection;
+- `POST /notes` with `{"body":"..."}` to write a durable note;
+- `GET /notes` to list notes in insertion order.
+
+Install [`uv`](https://docs.astral.sh/uv/), build the server once, and start the
+pinned Python project through the sidecar:
+
+```bash
+npm run build:server
+npm run start:python-example
+```
+
+Then exercise it locally:
+
+```bash
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/notes \
+  -H 'content-type: application/json' \
+  -d '{"body":"durable from Python"}'
+curl http://localhost:8000/notes
+```
+
+The sidecar restores the latest valid snapshot, opens PostgreSQL on `127.0.0.1`, and then launches the child without a shell. It injects both `DATABASE_URL` (standard PostgreSQL) and `LOCAL_PG_DSN` (SQLAlchemy asyncpg) into that child. It never prints either DSN or the child environment. `make sidecar-smoke` and `just sidecar-smoke` exercise the production build with a short-lived Node child.
+
+Sidecar configuration:
+
+- `PGLITE_DATA_DIR` is ephemeral live database storage and defaults to `.data/pglite`.
+- `SNAPSHOT_MODE` is `filesystem` by default or `appkit` for a Databricks Volume.
+- `SNAPSHOT_DIRECTORY` is the archive directory in filesystem mode.
+- `DATABRICKS_VOLUME_FILES` must be an absolute `/Volumes/<catalog>/<schema>/<volume>` root in AppKit mode. Bind that Volume to the app service principal with read/write access.
+- `PGLITE_SOCKET_HOST` must remain `127.0.0.1`; `PGLITE_SOCKET_PORT` defaults to `5432`.
+- `PGLITE_SOCKET_MAX_CONNECTIONS` defaults to `1`. Keep the child connection pool within that limit.
+- `SNAPSHOT_INTERVAL_MS` defaults to `30000`, `SNAPSHOT_RETENTION` to `3`, and `SIDECAR_SHUTDOWN_TIMEOUT_MS` to `10000`.
+
+Only one sidecar instance may own a database and snapshot root. Checkpoints are coordinated with socket execution so they do not cross transaction progress, and read-only SQL does not create archives. On shutdown the supervisor terminates the child, stops new socket work, checkpoints committed writes, and closes PGlite. A crash can still lose writes made since the last successful checkpoint; this is checkpoint durability, not synchronous PostgreSQL durability.
+
+This mode coexists with the original Express/React application. Use `npm start` for the original app and `npm run start:sidecar -- -- <command...>` for a supervised child.
 
 To run the same production image with snapshots bind-mounted from the host:
 
@@ -82,6 +124,19 @@ Build, deploy, and start the app:
 make deploy-run PROFILE=DEFAULT TARGET=dev
 make app-url PROFILE=DEFAULT
 ```
+
+To deploy the runnable Python example instead, use the opt-in target. The
+standard Node/browser app remains the default for later deployments:
+
+```bash
+make deploy-python
+# Windows-friendly equivalent:
+just deploy-python
+```
+
+Both commands default to Databricks CLI profile `DEFAULT` and bundle target
+`dev`; override `PROFILE` or `TARGET` through the existing environment
+variables when needed.
 
 The bundle provisions:
 

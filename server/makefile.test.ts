@@ -24,6 +24,17 @@ afterEach(async () => {
 });
 
 describe("Makefile deployment workflow", () => {
+  it("offers a sidecar smoke that launches an exact Node child command", () => {
+    const result = spawnSync("make", ["-n", "sidecar-smoke"], {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+      env: { ...process.env, MAKEFLAGS: "" },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("npm run start:sidecar -- -- node -e");
+  });
+
   it("does not execute Databricks commands during a deploy-run dry-run", async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "pglite-make-"));
     temporaryDirectories.push(temporaryDirectory);
@@ -60,5 +71,28 @@ describe("Makefile deployment workflow", () => {
     expect(await readFile(callLog, "utf8")).toBe("");
     expect(result.stdout).toContain("databricks bundle deploy -t dev -p DEFAULT");
     expect(result.stdout).toContain("databricks bundle run pglite_app -t dev -p DEFAULT");
+  });
+
+  it("deploys the opt-in Python example through the bundle app selector", () => {
+    const result = spawnSync(
+      "make",
+      ["-n", "deploy-python", "PROFILE=DEFAULT", "TARGET=dev"],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: { ...process.env, MAKEFLAGS: "" },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      'databricks bundle validate -t dev -p DEFAULT --var="app_script=start:python-example"',
+    );
+    expect(result.stdout).toContain(
+      'databricks bundle deploy -t dev -p DEFAULT --var="app_script=start:python-example"',
+    );
+    expect(result.stdout).toContain(
+      'databricks bundle run pglite_app -t dev -p DEFAULT --var="app_script=start:python-example"',
+    );
   });
 });
