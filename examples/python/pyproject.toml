@@ -1,0 +1,19 @@
+[project]
+name = "pglite-python-example"
+version = "0.1.0"
+description = "Runnable Python child app for the durable PGlite sidecar"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.116.1",
+  "psycopg[binary]==3.2.9",
+  "uvicorn==0.35.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "httpx==0.28.1",
+  "pytest==8.4.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["."]

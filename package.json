@@ -9,16 +9,19 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/server.ts",
     "build": "npm run build:server && npm run build:client",
-    "build:server": "tsdown --out-dir build server/server.ts",
+    "build:server": "tsdown --out-dir build server/server.ts server/sidecar.ts",
     "build:client": "vite build --config client/vite.config.ts",
     "start": "NODE_ENV=production node build/server.mjs",
+    "start:sidecar": "NODE_ENV=production node build/sidecar.mjs",
+    "start:python-example": "NODE_ENV=production node build/sidecar.mjs -- uv run --project examples/python uvicorn --app-dir examples/python app:app --host 0.0.0.0 --port 8000",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@databricks/appkit": "0.59.0",
-    "@electric-sql/pglite": "0.5.4",
+    "@electric-sql/pglite": "0.5.5",
+    "@electric-sql/pglite-socket": "0.2.8",
     "express": "4.22.2",
     "react": "19.1.1",
     "react-dom": "19.1.1",

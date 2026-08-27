@@ -5,6 +5,8 @@ sync:
   include:
     - build/**
     - client/dist/**
+    - examples/python/app.py
+    - examples/python/pyproject.toml
   exclude:
     - node_modules/**
 
@@ -30,6 +32,9 @@ variables:
   web_ui_enabled:
     description: "Serve the read-only browser frontend"
     default: "true"
+  app_script:
+    description: "npm script used to start the Databricks App"
+    default: "start"
 
   app_config:
     type: complex
@@ -37,7 +42,8 @@ variables:
     default:
       command:
         - npm
-        - start
+        - run
+        - ${var.app_script}
       env:
         - name: SNAPSHOT_MODE
           value: appkit
